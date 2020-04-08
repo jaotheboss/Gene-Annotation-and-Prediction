@@ -1,0 +1,358 @@
+---
+title: "Genome Annotation"
+author: "DSA4262 Group 1"
+output: pdf_document
+---
+
+```{r, message=F, warning=F}
+# Load the libraries required to run the analysis
+library(GenomicFeatures)
+library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+library("BSgenome.Hsapiens.UCSC.hg38")
+library(GenomicAlignments)
+# library(Gviz)
+library(Rsamtools)
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(DescTools)
+library(svMisc)
+library(gtable)
+```
+
+```{r}
+# Load the TxDb database
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+
+# Select information regarding genes and extract details on human chromosomes
+genes <- genes(txdb, columns=c("gene_id"), single.strand.genes.only=FALSE)
+genes <- as.data.frame(genes)
+chromosomes <- paste0("chr", c(1:22,"X","Y"))
+genes <- genes[genes$seqnames %in% chromosomes,]
+genes <- unique(genes[,c("group_name", "seqnames", "start", "end", "width", "strand")])
+colnames(genes) <- c("gene_id", "seqnames", "start", "end", "width", "strand")
+genes
+```
+
+```{r}
+# Read the BAM file downloaded
+bam.file <- readGAlignments("GIS_HepG2_directcDNA_Replicate1_genome.bam")
+
+# Rename the sequences to the same format as the TxDb database 
+seqlevelsStyle(bam.file) <- "UCSC"
+bam.file
+```
+
+```{r}
+# Convert the BAM file into a data frame for easier manipulation
+bam.df <- as.data.frame(bam.file)
+
+# Create index column in running order which will be useful later on when we are trying to find a particular entry
+bam.df$index <- c(1:nrow(bam.df))
+
+# Create an empty column which will store the gene_ids of potential matches from the BAM file to the genes in the TxDb dataset
+bam.df$possible_id <- " "
+
+# Remove columns that we do not need
+bam.df <- select(bam.df, -cigar, -qwidth)
+bam.df
+```
+
+```{r}
+# Duplicate the BAM dataframe 3 times as we will be altering the dataframes for each methods later on
+bam.df.1 <- bam.df
+bam.df.2 <- bam.df
+bam.df.3 <- bam.df
+```
+
+```{r}
+# For a first step, we extract information only on Chromosome 1 to see how each of the methods will perform
+chr1 <- filter(genes, seqnames=="chr1")
+chr1
+```
+
+```{r}
+# First method out of 3
+# Inputs: gene       - a single row from the TxDb dataset which will be used as the target and we will look through the whole BAM file 
+#                      and try to find genes that matches or are close to the inputed gene
+#         percent.sd - threshold to set the lower bound and upper bound of the search range for the start and end index
+
+
+find_potential_match_v1 <- function(gene, percent.sd){
+  
+  # Store the gene_id of the inputed gene which we will use to label the entries in matched genes from the BAM dataframe
+  g.id <- gene$gene_id
+  
+  # Set up the search range for both the start and end index, rounding off to 0 as the index are whole numbers
+  g.start.lower <- round(gene$start * (1-percent.sd),0)
+  g.start.upper <- round(gene$start * (1+percent.sd),0)
+  
+  g.end.lower <- round(gene$end * (1-percent.sd),0)
+  g.end.upper <- round(gene$end * (1+percent.sd),0)
+  
+  # We will be matching the gene based on the type of strand as well
+  g.strand <- as.character(gene$strand)
+  
+  # Filter the BAM dataframe for the same chromosome as the inputed gene, start index that falls in the search range and type of strand
+  candidate.start <- bam.df.1 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           start%in%c(g.start.lower:g.start.upper),
+           strand==g.strand)
+  
+  # Filter the BAM dataframe for the same chromosome as the inputed gene, end index that falls in the search range and type of strand
+  candidate.end <- bam.df.1 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           end%in%c(g.end.lower:g.end.upper),
+           strand==g.strand)
+  
+  # Combine the genes that are possible matches together
+  candidate <- rbind(candidate.start,candidate.end)
+  
+  ##### So as long as the actual resides within the guesses, it's considered found? 
+  ##### 
+  
+  # Check if there is at least one possible match to the inputed gene
+  if(nrow(candidate)>0){
+    
+    # Label the candidates with the current gene's id
+    candidate$possible_id <- paste0(candidate$possible_id, g.id, ",")
+    bam.df.1[candidate$index,]$possible_id <<- candidate$possible_id
+    
+    # Select columns and create the dataframe for plotting
+    gene.plot <- select(gene, start, end, width)
+    candidate.plot <- candidate %>%
+      select(start,end,width) %>%
+      arrange(start)
+    
+    # Inputed gene will be colored red while the candidate genes will be in black
+    df.plot <- rbind(gene.plot, candidate.plot) %>%
+      mutate(index=c((nrow(candidate.plot)+1):1)) %>%
+      mutate(col=c("red",rep("black",nrow(candidate.plot))))
+  
+    p1 <- ggplot(data=df.plot, aes(x=index, y=start))+
+      geom_segment(aes(xend= index, yend=end, col=col)) + 
+      coord_flip() +
+      labs(x="",y="",title=paste0("Gene ID: ",g.id)) +
+      theme_minimal() + 
+      scale_color_identity() +
+      theme(axis.text.y = element_blank(),
+            plot.title = element_text(hjust=0.5))
+    
+    # The function will output both the plot and dataframe containing all the possible matches in the BAM dataframe to the inputed gene
+    out <- list(plot=p1,
+                df=candidate)
+    
+  }else{
+    
+    out <- list(plot=paste0("No gene match in BAM file for Gene ID: ",g.id),
+                df=paste0("No gene match in BAM file for Gene ID: ",g.id))
+    
+  }
+  
+  return(out)
+  
+}
+```
+
+```{r}
+# Loop through every gene in chr1 and label the BAM dataframe with the possible matches
+
+start.time.1 <- Sys.time()
+for(i in 1:nrow(chr1)){
+  find_potential_match_v1(chr1[i,], 0.01)
+}
+end.time.1 <- Sys.time()
+cat("Total Time for Method 1: ", end.time.1-start.time.1)
+```
+
+```{r}
+# Everything will be the same as the first method except that we round off to 2 significant numbers for the search range instead of setting a threshold
+find_potential_match_v2 <- function(gene){
+  
+  g.id <- gene$gene_id
+  
+  g.start <- gene$start
+  
+  # Find the number of digits in the start index
+  g.start.ndigits <- nchar(as.character(g.start))
+
+  # Round off to 2 sf by floor and ceiling
+  g.start.lower <- RoundTo(g.start, multiple = 10**(g.start.ndigits-2), FUN =  floor)
+  g.start.upper <- RoundTo(g.start, multiple = 10**(g.start.ndigits-2), FUN =  ceiling)
+  
+  # Do the same as above but for the end index
+  g.end <- gene$end
+  g.end.ndigits <- nchar(as.character(g.end))
+  
+  g.end.lower <- RoundTo(g.end, multiple = 10**(g.end.ndigits-2), FUN =  floor)
+  g.end.upper <- RoundTo(g.end, multiple = 10**(g.end.ndigits-2), FUN =  ceiling)
+  
+  g.strand <- as.character(gene$strand)
+  
+  candidate.start <- bam.df.2 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           start%in%c(g.start.lower:g.start.upper),
+           strand==g.strand)
+  
+  candidate.end <- bam.df.2 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           end%in%c(g.end.lower:g.end.upper),
+           strand==g.strand)
+  
+  candidate <- rbind(candidate.start,candidate.end)
+  
+  if(nrow(candidate)>0){
+    
+    candidate$possible_id <- paste0(candidate$possible_id, g.id, ",")
+    bam.df.2[candidate$index,]$possible_id <<- candidate$possible_id
+  
+    gene.plot <- select(gene, start, end, width)
+  
+    candidate.plot <- candidate %>%
+      select(start,end,width) %>%
+      arrange(start)
+  
+    df.plot <- rbind(gene.plot, candidate.plot) %>%
+      mutate(index=c((nrow(candidate.plot)+1):1)) %>%
+      mutate(col=c("red",rep("black",nrow(candidate.plot))))
+  
+    p1 <- ggplot(data=df.plot, aes(x=index, y=start))+
+      geom_segment(aes(xend= index, yend=end, col=col)) + 
+      coord_flip() +
+      labs(x="",y="",title=paste0("Gene ID: ",g.id)) +
+      theme_minimal() + 
+      scale_color_identity() +
+      theme(axis.text.y = element_blank(),
+            plot.title = element_text(hjust=0.5))
+  
+    out <- list(plot=p1,
+                df=candidate)
+    
+  }else{
+    
+    out <- list(plot=paste0("No gene match in BAM file for Gene ID: ",g.id),
+                df=paste0("No gene match in BAM file for Gene ID: ",g.id))
+    
+  }
+  
+  return(out)
+  
+}
+```
+
+```{r}
+start.time.2 <- Sys.time()
+for(i in 1:nrow(chr1)){
+  find_potential_match_v2(chr1[i,])
+}
+end.time.2 <- Sys.time()
+cat("Total Time for Method 2: ", end.time.2-start.time.2)
+```
+
+```{r}
+# Same function as above except that we use different method to set the search range
+find_potential_match_v3 <- function(gene){
+  
+  g.id <- gene$gene_id
+  
+  g.start <- gene$start
+  g.start.ndigits <- nchar(as.character(g.start))
+  
+  # For index that are small, we simply round off to 2 sf
+  if(g.start.ndigits<6){
+    
+    g.start.lower <- RoundTo(g.start, multiple = 10**(g.start.ndigits-2), FUN =  floor)
+    g.start.upper <- RoundTo(g.start, multiple = 10**(g.start.ndigits-2), FUN =  ceiling)
+  
+    
+  # For large indices, we round off to the nearest 100 000    
+  }else{
+    
+    g.start.lower <- RoundTo(g.start, multiple = 10**5, FUN =  floor)
+    g.start.upper <- RoundTo(g.start, multiple = 10**5, FUN =  ceiling)
+    
+  }
+  
+  g.end <- gene$end
+  g.end.ndigits <- nchar(as.character(g.end))
+  
+  if(g.end.ndigits<6){
+      
+    g.end.lower <- RoundTo(g.end, multiple = 10**(g.end.ndigits-2), FUN =  floor)
+    g.end.upper <- RoundTo(g.end, multiple = 10**(g.end.ndigits-2), FUN =  ceiling)
+    
+  }else{
+    
+    g.end.lower <- RoundTo(g.end, multiple = 10**5, FUN =  floor)
+    g.end.upper <- RoundTo(g.end, multiple = 10**5, FUN =  ceiling)
+    
+  }
+  
+  g.strand <- as.character(gene$strand)
+  
+  candidate.start <- bam.df.3 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           start%in%c(g.start.lower:g.start.upper),
+           strand==g.strand)
+  
+  candidate.end <- bam.df.3 %>%
+    filter(seqnames==as.character(gene$seqnames), 
+           end%in%c(g.end.lower:g.end.upper),
+           strand==g.strand)
+  
+  candidate <- rbind(candidate.start,candidate.end)
+  
+  candidate <- distinct(candidate)
+  
+  if(nrow(candidate)>0){
+    
+    candidate$possible_id <- paste0(candidate$possible_id, g.id, ",")
+    bam.df.3[candidate$index,]$possible_id <<- candidate$possible_id
+  
+    gene.plot <- select(gene, start, end, width)
+  
+    candidate.plot <- candidate %>%
+      select(start,end,width) %>%
+      arrange(start)
+  
+    df.plot <- rbind(gene.plot, candidate.plot) %>%
+      mutate(index=c((nrow(candidate.plot)+1):1)) %>%
+      mutate(col=c("red",rep("black",nrow(candidate.plot))))
+  
+    p1 <- ggplot(data=df.plot, aes(x=index, y=start))+
+      geom_segment(aes(xend= index, yend=end, col=col)) + 
+      coord_flip() +
+      labs(x="",y="",title=paste0("Gene ID: ",g.id)) +
+      theme_minimal() + 
+      scale_color_identity() +
+      theme(axis.text.y = element_blank(),
+            plot.title = element_text(hjust=0.5))
+  
+    out <- list(plot=p1,
+                df=candidate)
+    
+  }else{
+    
+    out <- list(plot=paste0("No gene match in BAM file for Gene ID: ",g.id),
+                df=paste0("No gene match in BAM file for Gene ID: ",g.id))
+    
+  }
+  
+  return(out)
+
+}
+```
+
+```{r}
+start.time.3 <- Sys.time()
+for(i in 1:nrow(chr1)){
+  find_potential_match_v3(chr1[i,])
+}
+end.time.3 <- Sys.time()
+cat("Total Time for Method 3: ", end.time.3-start.time.3)
+```
+
+
+
+
