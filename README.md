@@ -1,7 +1,7 @@
 # Gene-Annotation-and-Prediction
 This project is about predicting the location of a gene in the human genome based off experimental data. 
 
-![DNA Strand]('https://github.com/jaotheboss/Gene-Annotation-and-Prediction/blob/master/dna.jpg')
+![DNA Strand](https://github.com/jaotheboss/Gene-Annotation-and-Prediction/blob/master/dna.jpg)
 
 ## Objective:
 1. Predict the location of a gene in the human genome from a BAM file.
