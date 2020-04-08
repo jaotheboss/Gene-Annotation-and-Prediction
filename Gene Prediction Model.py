@@ -7,24 +7,7 @@ Created on Wed Apr  1 20:23:48 2020
 """
 
 import os
-os.chdir('/Users/jaoming/Google Drive/School/NUS/Year 3 Sem 2/DSA4262/Projects/Project 7 (Genome Sequencing)')
-
-# =============================================================================
-######### NOT NEEDED ANYMORE
-# from Bio import SeqIO
-# 
-# # parsing the fasta file
-# input_file = 'GRCh38_latest_genomic.fna'
-# fasta_sequences = SeqIO.parse(open(input_file),'fasta')
-# 
-# # getting the sequences and their names (keys = names, values = sequences)
-# name_and_sequences = {}
-# for fasta in fasta_sequences:
-#        name_and_sequences[fasta.id] = str(fasta.seq)
-# 
-# names = list(name_and_sequences.keys())
-# 
-# =============================================================================
+os.chdir('file directory')
 
 import pandas as pd 
 import numpy as np
@@ -270,22 +253,3 @@ def main():
        gl = GeneLocater(bam_data)
        gene_predict = gl.Locate(0.1)
        gene_locater_eval(gene_predict, txdb_data)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
