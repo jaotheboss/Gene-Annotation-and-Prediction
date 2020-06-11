@@ -18,7 +18,7 @@ There is a difficulty in being able to detect which parts of the DNA is consider
 Therefore, for this project, i will be skipping the reading of the DNA sequences to predict where the gene starts and ends, but instead i will be processing the reading results from the equipment and attempt to predict the start and end locations from there. The reading results consists of the start and end indexes of where the equipment decides there to be the start and end of a gene. Hence, the equipment can have multiple readings for 1 gene. 
 
 ## Dataset:
-In this project, i will essentially be working with 2 types of data: BAM and TxDb.
+In this project, i will essentially be working with 2 types of data: BAM and TxDb.(Both of which are included in the zip file of this repo)
 
 1. BAM
 
